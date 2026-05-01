@@ -1,3 +1,8 @@
+try:
+    import readline
+except ImportError:
+    pass
+
 import sys
 from rich.console import Console
 from rich.panel import Panel
@@ -10,6 +15,7 @@ from project import (
 from memory import add_to_history
 from github import handle_github_command
 from chat import start_chat
+from readme import generate_readme  # new import
 
 console = Console()
 
@@ -31,6 +37,7 @@ HELP_TEXT = """
   [green]/github init <name>[/green]    → Create repo and push code
   [green]/github push <message>[/green] → Commit and push changes
   [green]/github status[/green]         → Show git status
+  [green]/readme[/green]                → Generate a README for the project
   [green]/help[/green]                  → Show this menu
   [green]/exit[/green]                  → Quit
 
@@ -75,6 +82,15 @@ def handle_command(user_input):
 
     elif cmd == "/github":
         handle_github_command(arg)
+
+    elif cmd == "/readme":
+        console.print("\n🧠 Generating README...")
+        result = generate_readme()
+        if result:
+            console.print(Panel(result, title="📄 README", border_style="magenta"))
+            if project:
+                add_to_history(project, "assistant", result)
+                save_active()
 
     elif cmd == "/ask":
         if not arg:
