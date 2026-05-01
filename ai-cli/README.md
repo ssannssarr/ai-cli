@@ -18,7 +18,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/<your-username>/ai-cli.git
+git clone https://github.com/ssannssarr/ai-cli.git
 cd ai-cli
 
 # (Optional) Create a virtual environment
