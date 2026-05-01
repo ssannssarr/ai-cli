@@ -29,6 +29,10 @@ source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
 pip install -r requirements.txt
 ```
 
+### 🔑 Configuration
+1. Rename `.env.example` to `.env`.
+2. Add your **OpenRouter API Key** to the `.env` file.
+
 > **Environment Variables**  
 > Ensure the following variables are set in your shell or a `.env` file:
 > ```bash

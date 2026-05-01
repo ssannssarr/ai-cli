@@ -4,6 +4,7 @@ except ImportError:
     pass
 
 import sys
+import shlex
 from rich.console import Console
 from rich.panel import Panel
 from router import send_request
@@ -15,7 +16,7 @@ from project import (
 from memory import add_to_history
 from github import handle_github_command
 from chat import start_chat
-from readme import generate_readme  # new import
+from readme import generate_readme
 
 console = Console()
 
@@ -45,43 +46,67 @@ HELP_TEXT = """
 """
 
 def handle_command(user_input):
-    parts = user_input.strip().split(" ", 1)
+    if not user_input.startswith("/"):
+        project = get_active()
+        console.print("\n🧠 Thinking...")
+        result = send_request(user_input, project=project)
+        if result:
+            console.print(Panel(result, title="💬 Answer", border_style="green"))
+            if project:
+                add_to_history(project, "user", user_input)
+                add_to_history(project, "assistant", result)
+                save_active()
+        return
+
+    try:
+        parts = shlex.split(user_input)
+    except ValueError as e:
+        console.print(f"[red]Error parsing command: {e}[/red]")
+        return
+
     cmd = parts[0].lower()
-    arg = parts[1] if len(parts) > 1 else ""
+    args = parts[1:]
     project = get_active()
 
     if cmd == "/fix":
-        safe_edit(arg, "Fix all bugs and improve this code.")
+        if not args:
+            console.print("[red]Usage: /fix <filename>[/red]")
+        else:
+            safe_edit(args[0], "Fix all bugs and improve this code.")
 
     elif cmd == "/optimize":
-        safe_edit(arg, "Optimize this code for performance and readability.")
+        if not args:
+            console.print("[red]Usage: /optimize <filename>[/red]")
+        else:
+            safe_edit(args[0], "Optimize this code for performance and readability.")
 
     elif cmd == "/explain":
-        explain_file(arg)
+        if not args:
+            console.print("[red]Usage: /explain <filename>[/red]")
+        else:
+            explain_file(args[0])
 
     elif cmd == "/create":
-        parts2 = arg.split(" ", 1)
-        if len(parts2) < 2:
-            console.print('[red]Usage: /create filename.py "description"[/red]')
+        if len(args) < 2:
+            console.print('[red]Usage: /create <filename> "description"[/red]')
         else:
-            create_file_ai(parts2[0], parts2[1].strip('"'))
+            create_file_ai(args[0], args[1])
 
     elif cmd == "/add":
-        parts2 = arg.split(" ", 1)
-        if len(parts2) < 2:
-            console.print('[red]Usage: /add filename.py "what to add"[/red]')
+        if len(args) < 2:
+            console.print('[red]Usage: /add <filename> "what to add"[/red]')
         else:
-            add_to_file(parts2[0], parts2[1].strip('"'))
+            add_to_file(args[0], args[1])
 
     elif cmd == "/chat":
         start_chat()
 
     elif cmd == "/project":
         save_active()
-        handle_project_command(arg)
+        handle_project_command(" ".join(args))
 
     elif cmd == "/github":
-        handle_github_command(arg)
+        handle_github_command(" ".join(args))
 
     elif cmd == "/readme":
         console.print("\n🧠 Generating README...")
@@ -93,15 +118,16 @@ def handle_command(user_input):
                 save_active()
 
     elif cmd == "/ask":
-        if not arg:
+        if not args:
             console.print("[red]Usage: /ask your question here[/red]")
             return
+        question = " ".join(args)
         console.print("\n🧠 Thinking...")
-        result = send_request(arg, project=project)
+        result = send_request(question, project=project)
         if result:
             console.print(Panel(result, title="💬 Answer", border_style="green"))
             if project:
-                add_to_history(project, "user", arg)
+                add_to_history(project, "user", question)
                 add_to_history(project, "assistant", result)
                 save_active()
 
@@ -114,14 +140,7 @@ def handle_command(user_input):
         sys.exit(0)
 
     else:
-        console.print("\n🧠 Thinking...")
-        result = send_request(user_input, project=project)
-        if result:
-            console.print(Panel(result, title="💬 Answer", border_style="green"))
-            if project:
-                add_to_history(project, "user", user_input)
-                add_to_history(project, "assistant", result)
-                save_active()
+        console.print(f"[red]Unknown command: {cmd}. Type /help for assistance.[/red]")
 
 def main():
     console.print(Panel(
