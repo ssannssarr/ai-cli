@@ -19,6 +19,7 @@ from memory import add_to_history
 from github import handle_github_command
 from chat import start_chat
 from readme import generate_readme
+from tcp import tcp_scan, parse_ports
 
 console = Console()
 
@@ -44,6 +45,7 @@ HELP_TEXT = """
   [green]/deepsearch <query>[/green]    → Perform a deep AI search
   [green]/help[/green]                  → Show this menu
   [green]/exit[/green]                  → Quit
+  [green]/tcp <host> -p 1-1024[/green]  → TCP port scan on target 
 
 [dim]Everything is confirmed before applying. Nothing changes without your approval.[/dim]
 """
@@ -159,13 +161,54 @@ def handle_command(user_input):
             except subprocess.CalledProcessError as e:
                 console.print(f"[red]Deep search failed: {e.stderr.strip()}[/red]")
 
+    elif cmd == "/tcp":
+        # Use argparse for clean sub‑argument parsing
+        import argparse
+        scan_parser = argparse.ArgumentParser(prog="/scan", add_help=False)
+        scan_parser.add_argument("host", help="Target hostname or IP")
+        scan_parser.add_argument("-p", "--ports", default="1-1000", help="Ports (e.g., 80,1-1024,22,443)")
+        scan_parser.add_argument("-t", "--timeout", type=float, default=1.0, help="Timeout in seconds")
+        scan_parser.add_argument("-w", "--workers", type=int, default=100, help="Concurrent threads")
+        try:
+            scan_args = scan_parser.parse_args(args)
+        except SystemExit:
+            # argparse prints its own error; we just continue
+            return
+
+        host = scan_args.host
+        try:
+            ports = parse_ports(scan_args.ports)
+        except ValueError as e:
+            console.print(f"[red]Error parsing ports: {e}[/red]")
+            return
+
+        console.print(f"\n🔎 Scanning {host} on {len(ports)} port(s) with timeout {scan_args.timeout}s...")
+        open_ports = tcp_scan(host, ports, scan_args.timeout, scan_args.workers)
+
+        if open_ports:
+            console.print("\n[bold green]Open ports:[/bold green]")
+            for port in open_ports:
+                # Quick banner grab (optional)
+                try:
+                    with socket.create_connection((host, port), timeout=1.0) as sock:
+                        sock.settimeout(1.0)
+                        banner = sock.recv(1024).decode(errors="ignore").strip()
+                except Exception:
+                    banner = "open"
+                console.print(f"  [cyan]{port}/tcp[/cyan]   {banner}")
+        else:
+            console.print("[yellow]No open ports found.[/yellow]")
     elif cmd == "/help":
         console.print(Panel(HELP_TEXT, border_style="cyan"))
 
     elif cmd == "/exit":
         save_active()
-        console.print("[yellow]👋 Goodbye![/yellow]")
+        console.print("[yellow] ~K Goodbye![/yellow]")
         sys.exit(0)
+
+
+
+
 
     else:
         console.print(f"[red]Unknown command: {cmd}. Type /help for assistance.[/red]")
