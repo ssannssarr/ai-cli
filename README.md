@@ -1,183 +1,126 @@
-# ai-cli
-
-**ai-cli** is a terminal‑based AI assistant that leverages OpenRouter models to help you code, reason, manage projects, and interact with GitHub—all from the command line.
-It provides an interactive chat, project context management, file safety utilities, README generation, and more.
+<h1 align="center">ai-cli</h1>
 
 ---
-
-## Table of Contents
-
-- [Features](#features)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Usage](#usage)
-- [Running the CLI](#running-the-cli)
-- [Core Commands](#core-commands)
-- [Project Management](#project-management)
-- [File Utilities](#file-utilities)
-- [GitHub Integration](#github-integration)
-- [Chat Mode](#chat-mode)
-- [README Generation](#readme-generation)
-- [License](#license)
-
 ---
 
-## Features
+`ai-cli` is a terminal-based AI assistant that uses OpenRouter models to help with coding, reasoning, project memory, GitHub actions, README generation, and TCP scanning from the command line.
 
-- **Multi‑model routing** – automatically selects the best OpenRouter model for coding, reasoning, or fallback tasks.
-- **Project awareness** – store project metadata, file history, and conversation context.
-- **Safe file editing** – preview diffs, explain changes, and edit files with AI assistance.
-- **GitHub commands** – quick repo interactions (clone, push, pull, create PR, etc.).
-- **Interactive chat** – a Rich‑styled chat UI with `/exit`, `/clear`, and context‑aware suggestions.
-- **Automatic README generation** – scan source files and produce a starter README.
-- **Extensible command parser** – built on `shlex` for robust argument handling.
+## Features:
 
----
+- Multi-model routing through OpenRouter with retry and fallback behavior.
+- Live free/paid OpenRouter model selection with cached model metadata.
+- Project-aware context saved under `~/.ai-cli/projects`.
+- Gemini-style status line, boxed prompt, and slash-command autocomplete.
+- AI-assisted file utilities with confirmations, previews, and backups.
+- Interactive chat mode with short local conversation history.
+- GitHub helpers for repo initialization, status, commits, and pushes.
+- README generation from local Python files.
+- TCP port scanning with configurable ports, timeout, and worker count.
 
-## Installation
+## Installation:
 
 ```bash
-# clone the repository
-git clone https://github.com/yourusername/ai-cli.git
+git clone https://github.com/ssannssarr/ai-cli.git
 cd ai-cli
 
-# create a virtual environment (optional but recommended)
 python -m venv .venv
-source .venv/bin/activate   # on Windows: .venv\Scripts\activate
+.venv\Scripts\activate
 
-# install dependencies
 pip install -r requirements.txt
 ```
 
-### Requirements
+On macOS or Linux, activate the virtual environment with:
 
-- Python 3.9+
-- An OpenRouter API key (see [Configuration](#configuration))
-- Optional: GitHub token for GitHub commands
+```bash
+source .venv/bin/activate
+```
 
----
-
-## Configuration
+## Configuration:
 
 Create a `.env` file in the project root:
 
-```dotenv
-# OpenRouter
+```bash
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 
-# GitHub (optional)
 GITHUB_TOKEN=your_github_token_here
 GITHUB_USERNAME=your_github_username_here
 ```
 
-The `config.py` module loads these variables automatically.
+`OPENROUTER_API_KEY` is required for AI requests. The GitHub values are only needed for `/github` commands.
 
----
+## Usage:
 
-## Usage
-
-### Running the CLI
+Start the CLI:
 
 ```bash
 python main.py
 ```
 
-You will be presented with a Rich‑styled prompt where you can type commands.
+Then type slash commands or ask a normal question directly. Start a line with `/` to browse matching commands, and press Tab to complete the selected command.
 
-### Core Commands
+## Commands:
 
 | Command | Description |
 |---------|-------------|
-| `project new <name>` | Create a new project and set it as active. |
-| `project list` | List all saved projects. |
-| `project switch <name>` | Switch active context to an existing project. |
-| `project info` | Show details of the current project. |
-| `file read <path>` | Safely read a file and display its contents. |
-| `file edit <path>` | Open an AI‑assisted edit session for a file. |
-| `file explain <path>` | Ask the AI to explain a file’s purpose. |
-| `github <subcommand>` | Run GitHub‑related actions (`clone`, `push`, `pull`, `pr`, etc.). |
-| `chat` | Enter interactive chat mode (`/exit` to quit, `/clear` to reset history). |
-| `readme generate` | Auto‑generate a README based on project files. |
-| `history show` | Display the command/history log for the active project. |
-| `exit` | Quit the CLI. |
+| `/ask <question>` | Ask a one-off AI question. |
+| `/chat` | Enter interactive chat mode. |
+| `/fix <path>` | Ask AI to fix and improve a file after confirmation. |
+| `/optimize <path>` | Ask AI to optimize a file after confirmation. |
+| `/explain <path>` | Ask AI to explain a file. |
+| `/create <path> "description"` | Generate a new file from a description. |
+| `/add <path> "request"` | Add a feature to an existing file after confirmation. |
+| `/project new <name>` | Create and load a project. |
+| `/project use <name>` | Load an existing project. |
+| `/project list` | Show saved projects. |
+| `/project status` | Show the active project. |
+| `/project clear` | Unload the active project. |
+| `/github init <name>` | Initialize git, create a GitHub repo, and push. |
+| `/github push <message>` | Commit and push changes. |
+| `/github status` | Show git status and recent commits. |
+| `/model current` | Show the active OpenRouter model. |
+| `/model list free` | Show currently available free text models. |
+| `/model list paid` | Show currently available paid text models. |
+| `/model use <model-id>` | Save the active model. Paid models require confirmation. |
+| `/model refresh` | Refresh the OpenRouter model cache. |
+| `/readme` | Generate a README preview and optionally save it. |
+| `/deepsearch <query>` | Run the bundled deep-search script. |
+| `/tcp <host> -p <ports>` | Scan TCP ports, for example `/tcp example.com -p 80,443`. |
+| `/help` | Show the command menu. |
+| `/exit` | Quit the CLI. |
 
-(For a full list, type `help` inside the CLI.)
+## Project Memory
 
----
-
-## Project Management
-
-Projects are stored under `~/.ai-cli/projects` as JSON files. Each project tracks:
-
-- Project name, creation date, and last used timestamp
-- Files added/modified with timestamps
-- Chat/history entries for context‑aware AI calls
-
-Key functions are located in `project.py` and `memory.py`.
-
-Commands:
-
-```bash
-project new my-awesome-app
-project switch my-awesome-app
-project info
-project list
-```
-
----
-
-## File Utilities
-
-Located in `filesafe.py`:
-
-- `read_file(path)` – safely reads and returns file contents.
-- `safe_edit(path, prompt)` – AI‑assisted edit with diff preview.
-- `explain_file(path, prompt)` – asks the model to explain code.
-- `create_file_ai(path, description)` – generate a new file from a description.
-- `add_to_file(path, snippet)` – append AI‑generated code to an existing file.
-
-All operations output Rich panels with clear success/error messages.
-
----
-
-## GitHub Integration
-
-Implemented in `github.py`. Example usage inside the CLI:
+Projects are stored as JSON files under `~/.ai-cli/projects`. An active project can add recent conversation and file summaries to future AI prompts.
 
 ```bash
-github clone https://github.com/user/repo.git
-github status
-github push origin main
-github pr create "Fix bug in authentication"
+/project new my-awesome-app
+/project use my-awesome-app
+/project status
+/project list
 ```
 
-The module reads `GITHUB_TOKEN` and `GITHUB_USERNAME` from the environment for authentication.
+## Model Selection
 
----
-
-## Chat Mode
-
-Launch with the `chat` command. The chat UI:
-
-- Shows a header panel `[project:chat]` if a project is active.
-- Supports `/exit` to quit and `/clear` to reset the conversation.
-- Sends prompts to the appropriate model via `router.send_request`.
-- Displays AI responses in a formatted Rich panel.
-
----
-
-## README Generation
-
-Run:
+Models are fetched from OpenRouter's live Models API and cached under `~/.ai-cli/models_cache.json`. The selected model is saved in `~/.ai-cli/config.json`.
 
 ```bash
-readme generate
+/model refresh
+/model list free
+/model list paid
+/model use openai/gpt-oss-120b:free
+/model current
 ```
 
-The `readme.py` module scans the current directory for Python files, extracts the first 500 characters of each, and builds a starter README using the AI model. The generated content is displayed in the terminal for you to copy or save.
+If no model is selected, the router uses the first cached or fetched free model. Paid models can be selected, but the CLI asks for confirmation before saving them.
 
----
+## Development
+
+Install dependencies, then run the tests:
+
+```bash
+python -m unittest
+```
 
 ## License
 
-This project is licensed under the **MIT License**. See the `LICENSE` file for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
