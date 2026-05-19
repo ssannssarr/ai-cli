@@ -2,7 +2,7 @@ import os
 from rich.console import Console
 from rich.panel import Panel
 from rich.markup import escape
-from router import send_request
+from module.router import send_request
 
 console = Console()
 

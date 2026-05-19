@@ -1,7 +1,7 @@
 from rich.console import Console
 from rich.panel import Panel
-from router import send_request
-from project import get_active
+from module.router import send_request
+from module.project import get_active
 
 console = Console()
 
@@ -36,7 +36,7 @@ def start_chat():
             # Build context from history
             history.append({"role": "user", "content": user_input})
             context = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in history[-10:]])
-            prompt = f"You are a helpful AI assistant. Here is the conversation so far:\n\n{context}\n\nRespond to the last user message."
+            prompt = f"Here is the conversation so far:\n\n{context}\n\nRespond to the last user message."
 
             console.print("\n🧠 Thinking...")
             result = send_request(prompt, project=project)

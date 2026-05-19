@@ -4,6 +4,9 @@ from datetime import datetime
 
 MEMORY_DIR = os.path.expanduser("~/.ai-cli/projects")
 
+def ensure_memory_dir():
+    os.makedirs(MEMORY_DIR, exist_ok=True)
+
 def get_project_path(name):
     return os.path.join(MEMORY_DIR, f"{name}.json")
 
@@ -29,11 +32,13 @@ def load_project(name):
         return json.load(f)
 
 def save_project(name, data):
+    ensure_memory_dir()
     data["last_used"] = datetime.now().isoformat()
     with open(get_project_path(name), "w") as f:
         json.dump(data, f, indent=2)
 
 def list_projects():
+    ensure_memory_dir()
     return [f.replace(".json", "") for f in os.listdir(MEMORY_DIR) if f.endswith(".json")]
 
 def add_to_history(project, role, content):

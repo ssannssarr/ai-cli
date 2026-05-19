@@ -2,7 +2,7 @@ import os
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from memory import (
+from module.memory import (
     create_project, load_project, save_project,
     list_projects, add_to_history, build_context
 )
