@@ -1,9 +1,9 @@
 import requests
 import time
 import sys
-from config import API_KEY, BASE_URL, MAX_RETRIES, TIMEOUT, APP_NAME
-from models import MODELS, FALLBACK_ORDER
-from memory import build_context
+from module.config import API_KEY, BASE_URL, MAX_RETRIES, TIMEOUT, APP_NAME
+from module.models import MODELS, FALLBACK_ORDER
+from module.memory import build_context
 
 def classify_task(prompt):
     p = prompt.lower()

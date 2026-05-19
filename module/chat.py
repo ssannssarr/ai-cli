@@ -1,7 +1,7 @@
 from rich.console import Console
 from rich.panel import Panel
-from router import send_request
-from project import get_active
+from module.router import send_request
+from module.project import get_active
 
 console = Console()
 

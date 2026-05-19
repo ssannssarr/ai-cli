@@ -9,17 +9,17 @@ import subprocess
 import os
 from rich.console import Console
 from rich.panel import Panel
-from router import send_request
-from filesafe import safe_edit, explain_file, create_file_ai, add_to_file
-from project import (
+from module.router import send_request
+from module.filesafe import safe_edit, explain_file, create_file_ai, add_to_file
+from module.project import (
     handle_project_command, get_active,
     save_active, auto_detect_project
 )
-from memory import add_to_history
-from github import handle_github_command
-from chat import start_chat
-from readme import generate_readme
-from tcp import tcp_scan, parse_ports
+from module.memory import add_to_history
+from module.github import handle_github_command
+from module.chat import start_chat
+from module.readme import generate_readme
+from module.tcp import tcp_scan, parse_ports
 
 console = Console()
 
