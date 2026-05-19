@@ -1,8 +1,3 @@
-try:
-    import readline
-except ImportError:
-    pass
-
 import argparse
 import os
 import shlex
@@ -10,9 +5,11 @@ import socket
 import subprocess
 import sys
 
-from prompt_toolkit import prompt
+from prompt_toolkit import PromptSession
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.panel import Panel
@@ -42,6 +39,7 @@ from module.router import send_request
 from module.tcp import parse_ports, tcp_scan
 
 console = Console()
+HISTORY_PATH = os.path.expanduser("~/.ai-cli/history.txt")
 
 COMMANDS = [
     ("/add", "/add <file> \"request\" - add a feature to a file"),
@@ -90,6 +88,26 @@ class SlashCommandCompleter(Completer):
                     display_meta=description,
                 )
 
+
+PROMPT_SESSION = None
+
+
+def get_prompt_session():
+    global PROMPT_SESSION
+    if PROMPT_SESSION is not None:
+        return PROMPT_SESSION
+
+    os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
+    PROMPT_SESSION = PromptSession(
+        history=FileHistory(HISTORY_PATH),
+        completer=SlashCommandCompleter(),
+        complete_while_typing=True,
+        auto_suggest=AutoSuggestFromHistory(),
+        enable_history_search=True,
+        style=PROMPT_STYLE,
+    )
+    return PROMPT_SESSION
+
 HELP_TEXT = """
 [bold cyan]AI CLI - Command Reference[/bold cyan]
 
@@ -134,11 +152,8 @@ def draw_prompt_box(project):
 
     console.print(f"\n[bright_black]+{status_line}+[/bright_black]")
     console.print("[bright_black]|[/bright_black] [dim]Type / to browse commands, Tab to complete[/dim]")
-    user_input = prompt(
+    user_input = get_prompt_session().prompt(
         HTML("<ansigreen><b>| ></b></ansigreen> "),
-        completer=SlashCommandCompleter(),
-        complete_while_typing=True,
-        style=PROMPT_STYLE,
     )
     console.print(f"[bright_black]+{'-' * inner_width}+[/bright_black]")
     return user_input.strip()

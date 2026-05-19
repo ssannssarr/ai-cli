@@ -53,7 +53,10 @@ def send_request(prompt, task_type=None, project=None):
                 },
                 json={
                     "model": model_id,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": [
+                        {"role": "system", "content": "You are a terminal AI assistant. Do not use any markdown formatting."},
+                        {"role": "user", "content": prompt}
+                    ],
                 },
                 timeout=TIMEOUT,
             )
