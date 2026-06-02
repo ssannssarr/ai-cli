@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -34,6 +35,7 @@ from module.project import (
     handle_project_command,
     save_active,
 )
+from module.repoanalyze import build_repo_analysis_prompt
 from module.readme import generate_readme
 from module.router import send_request
 from module.tcp import parse_ports, tcp_scan
@@ -43,6 +45,7 @@ HISTORY_PATH = os.path.expanduser("~/.ai-cli/history.txt")
 
 COMMANDS = [
     ("/add", "/add <file> \"request\" - add a feature to a file"),
+    ("/analyze", "/analyze [question] - analyze the repo using local file reads"),
     ("/ask", "/ask <question> - ask a one-off question"),
     ("/chat", "/chat - start continuous chat mode"),
     ("/create", "/create <file> \"desc\" - generate a new file"),
@@ -116,6 +119,7 @@ HELP_TEXT = """
   [green]/optimize file.py[/green]      -> Optimize a file for performance
   [green]/create file.py "desc"[/green] -> AI generates a new file
   [green]/add file.py "what"[/green]    -> AI adds feature to existing file
+  [green]/analyze[/green]               -> Analyze the repository from local files
   [green]/ask your question[/green]     -> Ask anything directly
   [green]/chat[/green]                  -> Start continuous chat mode
   [green]/project new <name>[/green]    -> Create new project
@@ -140,6 +144,11 @@ HELP_TEXT = """
 [dim]Everything is confirmed before applying. Nothing changes without your approval.[/dim]
 """
 
+LOCAL_TOOL_HINT = (
+    "[dim]Plain English works too: 'analyze the repo', 'explain main.py', "
+    "'scan localhost ports 22,80', 'list free models', 'project status'.[/dim]"
+)
+
 
 def draw_prompt_box(project):
     project_name = project["name"] if project else "none"
@@ -151,7 +160,10 @@ def draw_prompt_box(project):
     status_line = status[:inner_width].ljust(inner_width, "-")
 
     console.print(f"\n[bright_black]+{status_line}+[/bright_black]")
-    console.print("[bright_black]|[/bright_black] [dim]Type / to browse commands, Tab to complete[/dim]")
+    console.print(
+        "[bright_black]|[/bright_black] "
+        "[dim]Type / to browse commands, Tab to complete, or ask naturally[/dim]"
+    )
     user_input = get_prompt_session().prompt(
         HTML("<ansigreen><b>| ></b></ansigreen> "),
     )
@@ -167,6 +179,384 @@ def remember_exchange(project, user_text=None, assistant_text=None):
     if assistant_text:
         add_to_history(project, "assistant", assistant_text)
     save_active()
+
+
+def tokenize_natural_input(user_input):
+    try:
+        return shlex.split(user_input)
+    except ValueError:
+        return user_input.split()
+
+
+def _strip_token(token):
+    return token.strip().strip(".,:;!?()[]{}")
+
+
+def extract_existing_path(user_input):
+    quoted = re.findall(r'["\']([^"\']+)["\']', user_input)
+    candidates = quoted + tokenize_natural_input(user_input)
+
+    for candidate in candidates:
+        token = _strip_token(candidate)
+        if not token:
+            continue
+        expanded = os.path.expanduser(token)
+        if os.path.exists(expanded):
+            return token
+    return None
+
+
+def extract_fileish_token(user_input):
+    for candidate in re.findall(r'[\w./~:-]+\.\w+', user_input):
+        token = _strip_token(candidate)
+        if token:
+            return token
+    return None
+
+
+def extract_host(user_input):
+    patterns = [
+        r"(?:scan|check|probe)\s+([a-zA-Z0-9][a-zA-Z0-9.-]*(?:\.[a-zA-Z]{2,})?|localhost|\d{1,3}(?:\.\d{1,3}){3})",
+        r"(?:host|server|target)\s+([a-zA-Z0-9][a-zA-Z0-9.-]*(?:\.[a-zA-Z]{2,})?|localhost|\d{1,3}(?:\.\d{1,3}){3})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, user_input, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+def extract_ports(user_input):
+    match = re.search(r"ports?\s+([0-9,\-\s]+)", user_input, flags=re.IGNORECASE)
+    if not match:
+        return None
+    ports = re.sub(r"\s+", "", match.group(1))
+    return ports or None
+
+
+def infer_file_command(user_input, lowered):
+    path = extract_existing_path(user_input)
+
+    if any(keyword in lowered for keyword in ("explain", "describe this file", "what does")) and path:
+        return ("/explain", [path])
+
+    if any(keyword in lowered for keyword in ("optimize", "improve performance", "speed up")) and path:
+        return ("/optimize", [path])
+
+    if any(keyword in lowered for keyword in ("fix", "debug", "repair")) and path:
+        return ("/fix", [path])
+
+    if "add " in lowered and path:
+        before, _, after = user_input.partition(path)
+        request = (before + after).strip(" ,.")
+        request = re.sub(r"(?i)^add\b", "", request).strip(" ,.")
+        request = re.sub(r"(?i)\bto\b$", "", request).strip(" ,.")
+        if request:
+            return ("/add", [path, request])
+
+    create_keywords = ("create", "generate", "make")
+    if any(keyword in lowered for keyword in create_keywords):
+        path = extract_fileish_token(user_input)
+        if path:
+            description = re.sub(rf'(?i)\b{re.escape(path)}\b', "", user_input, count=1).strip(" ,.")
+            description = re.sub(r"(?i)^(create|generate|make)\s+", "", description).strip(" ,.")
+            description = re.sub(r"(?i)^file\s+", "", description).strip(" ,.")
+            if description:
+                return ("/create", [path, description])
+
+    return None
+
+
+def infer_model_command(user_input, lowered):
+    if "model" not in lowered and not any(term in lowered for term in ("free models", "paid models")):
+        return None
+
+    if any(term in lowered for term in ("current model", "active model", "which model")):
+        return ("/model", ["current"])
+    if any(term in lowered for term in ("refresh models", "update models", "sync models")):
+        return ("/model", ["refresh"])
+    if "free model" in lowered or "free models" in lowered:
+        if any(term in lowered for term in ("list", "show", "available", "what are")):
+            return ("/model", ["list", "free"])
+    if "paid model" in lowered or "paid models" in lowered:
+        if any(term in lowered for term in ("list", "show", "available", "what are")):
+            return ("/model", ["list", "paid"])
+
+    match = re.search(
+        r"(?:use|switch to|set)\s+(?:model\s+)?([a-zA-Z0-9._/-]+(?::[a-zA-Z0-9._-]+)?)",
+        user_input,
+        flags=re.IGNORECASE,
+    )
+    if match and "/" in match.group(1):
+        return ("/model", ["use", match.group(1)])
+
+    return None
+
+
+def infer_project_command(user_input, lowered):
+    if "project" not in lowered:
+        return None
+
+    if any(term in lowered for term in ("project status", "active project", "current project")):
+        return ("/project", ["status"])
+    if any(term in lowered for term in ("list projects", "show projects", "saved projects")):
+        return ("/project", ["list"])
+    if any(term in lowered for term in ("clear project", "unload project", "close project")):
+        return ("/project", ["clear"])
+
+    create_match = re.search(r"(?:create|new)\s+project\s+([^\s]+)", user_input, flags=re.IGNORECASE)
+    if create_match:
+        return ("/project", ["new", create_match.group(1)])
+
+    use_match = re.search(r"(?:use|load|open|switch to)\s+project\s+([^\s]+)", user_input, flags=re.IGNORECASE)
+    if use_match:
+        return ("/project", ["use", use_match.group(1)])
+
+    return None
+
+
+def infer_github_command(user_input, lowered):
+    if not any(term in lowered for term in ("github", "git status", "repo status", "commit and push", "push")):
+        return None
+
+    if any(term in lowered for term in ("github status", "git status", "repo status")):
+        return ("/github", ["status"])
+
+    init_match = re.search(r"(?:init|initialize|create)\s+(?:github\s+)?repo(?:sitory)?\s+([^\s]+)", user_input, flags=re.IGNORECASE)
+    if init_match:
+        return ("/github", ["init", init_match.group(1)])
+
+    push_match = re.search(
+        r"(?:push|commit and push)(?:\s+(?:to\s+github)?)?(?:\s+with\s+message)?\s+(.+)",
+        user_input,
+        flags=re.IGNORECASE,
+    )
+    if push_match and "push" in lowered:
+        message = push_match.group(1).strip().strip("\"'")
+        if message and message.lower() not in {"to github", "github"}:
+            return ("/github", ["push", message])
+        return ("/github", ["push"])
+
+    return None
+
+
+def infer_tcp_command(user_input, lowered):
+    if not any(term in lowered for term in ("scan", "port", "tcp")):
+        return None
+
+    host = extract_host(user_input)
+    if not host:
+        return None
+
+    args = [host]
+    ports = extract_ports(user_input)
+    if ports:
+        args.extend(["-p", ports])
+    return ("/tcp", args)
+
+
+def split_planner_steps(user_input):
+    text = user_input.strip()
+    if not text:
+        return []
+
+    parts = re.split(
+        r"\s*(?:,?\s+then\s+|,?\s+and\s+then\s+|;\s*|\s*->\s*|\n+)\s*",
+        text,
+        flags=re.IGNORECASE,
+    )
+    steps = []
+    for part in parts:
+        cleaned = part.strip(" ,.")
+        if not cleaned:
+            continue
+        steps.append(cleaned)
+    return steps or [text]
+
+
+def normalize_followup_step(step, previous_step):
+    lowered = step.lower()
+    previous_lowered = previous_step.lower() if previous_step else ""
+
+    if "readme" in previous_lowered and lowered.startswith("commit and push"):
+        return f"github {step}"
+    if "project" in previous_lowered and lowered in {"status", "clear", "list"}:
+        return f"project {step}"
+    if "model" in previous_lowered and any(token in lowered for token in ("current", "refresh", "free", "paid", "use ")):
+        return f"model {step}"
+    return step
+
+
+def build_execution_plan(user_input):
+    raw_steps = split_planner_steps(user_input)
+    if len(raw_steps) <= 1:
+        command = infer_builtin_command(user_input)
+        if command:
+            return [{"type": "local", "command": command[0], "args": command[1], "source": user_input}]
+        return [{"type": "ai", "prompt": user_input, "source": user_input}]
+
+    plan = []
+    previous_step = None
+    for raw_step in raw_steps:
+        step = normalize_followup_step(raw_step, previous_step)
+        inferred = infer_builtin_command(step)
+        if inferred:
+            plan.append({"type": "local", "command": inferred[0], "args": inferred[1], "source": raw_step})
+        else:
+            plan.append({"type": "ai", "prompt": step, "source": raw_step})
+        previous_step = step
+    return plan
+
+
+def print_execution_plan(plan):
+    if len(plan) <= 1:
+        return
+
+    console.print("\n[cyan]Plan:[/cyan]")
+    for index, step in enumerate(plan, start=1):
+        if step["type"] == "local":
+            rendered = " ".join([step["command"]] + [shlex.quote(arg) for arg in step["args"]])
+            console.print(f"  {index}. local -> {rendered}")
+        else:
+            console.print(f"  {index}. ai -> {step['prompt']}")
+
+
+def handle_repo_analysis(args, project):
+    request = " ".join(args).strip() if args else ""
+    prompt, repo = build_repo_analysis_prompt(request)
+    console.print(
+        f"\n[cyan]Analyzing repository from local files...[/cyan] "
+        f"({repo['files_read']} files, {repo['total_chars']} chars)"
+    )
+    result = send_request(prompt, task_type="reasoning", project=project)
+    if result:
+        console.print(Panel(result, title="Repository Analysis", border_style="green"))
+        original_request = request or "analyze the repo"
+        remember_exchange(project, original_request, result)
+
+
+def validate_local_step(command, args):
+    if command in {"/fix", "/optimize", "/explain", "/add"}:
+        if not args:
+            return False, "missing file path"
+        path = os.path.expanduser(args[0])
+        if not os.path.exists(path):
+            return False, f"file not found: {args[0]}"
+        return True, None
+
+    if command == "/create":
+        if len(args) < 2:
+            return False, "missing file path or description"
+        return True, None
+
+    if command == "/tcp":
+        if not args:
+            return False, "missing host"
+        try:
+            port_spec = "1-1000"
+            if "-p" in args:
+                port_spec = args[args.index("-p") + 1]
+            parse_ports(port_spec)
+        except (IndexError, ValueError) as exc:
+            return False, f"invalid tcp arguments: {exc}"
+        return True, None
+
+    return True, None
+
+
+def replan_failed_step(step, error):
+    source = step.get("source") or step.get("prompt") or ""
+    if step["type"] == "local":
+        prompt = (
+            f"The local tool plan for this request failed: {error}.\n"
+            f"User request: {source}\n"
+            "Handle the request directly and explain any limitation briefly."
+        )
+    else:
+        prompt = source
+    return {"type": "ai", "prompt": prompt, "source": source, "replanned_from_error": error}
+
+
+def execute_local_step(step):
+    is_valid, error = validate_local_step(step["command"], step["args"])
+    if not is_valid:
+        return False, error
+
+    try:
+        execute_inferred_command(step["command"], step["args"])
+    except Exception as exc:
+        return False, str(exc)
+
+    return True, None
+
+
+def execute_ai_step(prompt, project):
+    console.print("\n[cyan]Thinking...[/cyan]")
+    result = send_request(prompt, project=project)
+    if result:
+        console.print(Panel(result, title="Answer", border_style="green"))
+        remember_exchange(project, prompt, result)
+
+
+def execute_plan(plan, project):
+    print_execution_plan(plan)
+    for step in plan:
+        if step["type"] == "local":
+            success, error = execute_local_step(step)
+            if success:
+                continue
+
+            console.print(f"[yellow]Step failed, replanning:[/yellow] {error}")
+            replanned = replan_failed_step(step, error)
+            execute_ai_step(replanned["prompt"], project)
+        else:
+            execute_ai_step(step["prompt"], project)
+
+
+def infer_builtin_command(user_input):
+    lowered = user_input.lower().strip()
+
+    if any(
+        phrase in lowered
+        for phrase in ("analyze the repo", "analyze repo", "analyze the repository", "analyze repository")
+    ):
+        request = re.sub(
+            r"(?i)\banalyze\s+(?:the\s+)?repo(?:sitory)?\b",
+            "",
+            user_input,
+            count=1,
+        ).strip(" ,.")
+        return ("/analyze", [request] if request else [])
+    if lowered in {"help", "show help", "open help", "what can you do"}:
+        return ("/help", [])
+    if lowered in {"exit", "quit", "close ai-cli"}:
+        return ("/exit", [])
+    if lowered in {"chat", "start chat", "open chat"}:
+        return ("/chat", [])
+    if any(term in lowered for term in ("generate readme", "create readme", "write readme", "make readme")):
+        return ("/readme", [])
+    if lowered.startswith("deep search ") or lowered.startswith("deepsearch "):
+        query = user_input.split(" ", 2)[-1].strip()
+        return ("/deepsearch", [query]) if query else None
+
+    for infer in (
+        infer_file_command,
+        infer_model_command,
+        infer_project_command,
+        infer_github_command,
+        infer_tcp_command,
+    ):
+        command = infer(user_input, lowered)
+        if command:
+            return command
+
+    return None
+
+
+def execute_inferred_command(command, args):
+    rendered = " ".join([command] + [shlex.quote(arg) for arg in args])
+    console.print(f"\n[cyan]Using local tool:[/cyan] {rendered}")
+    execute_slash_command(command, args)
 
 
 def handle_deepsearch(args, project):
@@ -323,27 +713,13 @@ def handle_model_command(args, confirm_func=input):
   /model refresh[/cyan]""")
 
 
-def handle_command(user_input):
+def execute_slash_command(cmd, args):
     project = get_active()
 
-    if not user_input.startswith("/"):
-        console.print("\n[cyan]Thinking...[/cyan]")
-        result = send_request(user_input, project=project)
-        if result:
-            console.print(Panel(result, title="Answer", border_style="green"))
-            remember_exchange(project, user_input, result)
-        return
+    if cmd == "/analyze":
+        handle_repo_analysis(args, project)
 
-    try:
-        parts = shlex.split(user_input)
-    except ValueError as ve:
-        console.print(f"[red]Error parsing command: {ve}[/red]")
-        return
-
-    cmd = parts[0].lower()
-    args = parts[1:]
-
-    if cmd == "/fix":
+    elif cmd == "/fix":
         if not args:
             console.print("[red]Usage: /fix <filename>[/red]")
         else:
@@ -422,14 +798,34 @@ def handle_command(user_input):
         console.print(f"[red]Unknown command: {cmd}. Type /help for assistance.[/red]")
 
 
+def handle_command(user_input):
+    project = get_active()
+
+    if not user_input.startswith("/"):
+        plan = build_execution_plan(user_input)
+        execute_plan(plan, project)
+        return
+
+    try:
+        parts = shlex.split(user_input)
+    except ValueError as ve:
+        console.print(f"[red]Error parsing command: {ve}[/red]")
+        return
+
+    cmd = parts[0].lower()
+    args = parts[1:]
+    execute_slash_command(cmd, args)
+
+
 def main():
     console.print(
         Panel(
             "[bold green]AI-CLI Ready[/bold green]\n"
-            "Type [cyan]/help[/cyan] for commands or just ask anything.",
+            "Type [cyan]/help[/cyan] for commands or ask naturally to trigger local tools.",
             border_style="green",
         )
     )
+    console.print(LOCAL_TOOL_HINT)
 
     auto_detect_project()
 
