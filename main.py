@@ -836,7 +836,7 @@ def main():
                 continue
             handle_command(user_input)
 
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt,EOFError):
             save_active()
             console.print("\n[yellow]Goodbye![/yellow]")
             sys.exit(0)
